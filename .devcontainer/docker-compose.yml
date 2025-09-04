@@ -1,0 +1,35 @@
+services:
+  app:
+    build:
+      context: ..
+      dockerfile: .devcontainer/dockerfile   # keep lower-case to match your filename
+    volumes:
+      - ..:/workspace:cached                 # mount project root, not .devcontainer
+    working_dir: /workspace
+    environment:
+      - PYTHONDONTWRITEBYTECODE=1
+      - PYTHONUNBUFFERED=1
+      - PIP_ROOT_USER_ACTION=ignore
+      - PIP_DISABLE_PIP_VERSION_CHECK=1
+    ports:
+      - "8000:8000"
+    command: sleep infinity
+
+  mlflow:
+    build:
+      context: ..
+      dockerfile: .devcontainer/dockerfile   # explicitly use the devcontainer dockerfile
+    command: >
+      python -m mlflow server
+      --host 0.0.0.0
+      --port 5000
+      --backend-store-uri
+      postgresql+psycopg2://${DB_USER}:${DB_PASSWORD}@${DB_HOST}:${DB_PORT}/${DB_DATABASE}?options=-csearch_path%3D${DB_SCHEMA}
+      --artifacts-destination file:/app/artifacts
+    ports:
+      - "5001:5000"
+    volumes:
+      - ../artifacts:/app/artifacts          # artifacts outside .devcontainer
+      - ..:/app                              # mount project root
+    # env_file:
+    #   - ../.env                              # put DB_* here (see step 3)
