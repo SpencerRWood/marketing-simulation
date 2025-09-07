@@ -1,0 +1,27 @@
+# configs/simulation.default.yaml
+
+# Random seed for reproducibility
+seed: 24
+
+# Simulation time controls
+start_dt_utc: "2025-01-01T00:00:00Z"   # optional, defaults to now if missing
+end_dt_utc:   "2025-01-02T00:00:00Z"
+# days: 7                                # number of days to simulate
+grace_period_s: 600                    # seconds to let stragglers finish
+
+# Database persistence
+reset_tables: true                     # truncate tables at start
+batch_size: 5000                       # how many events per bulk insert
+
+# Visitor dynamics
+# daily_visitors: 1000                   # baseline arrivals per day
+# retention_rate: 0.2                    # fraction of users who return next day
+# max_sessions_per_user: 5               # cap on total sessions
+
+# Logging & monitoring
+log_level: "INFO"                      # INFO, DEBUG, WARNING
+log_params: true                       # log ground truth parameters at run start
+
+# Exogenous effects (optional extensions)
+# seasonality: true                      # enable/disable seasonality adjustment
+# shock_events: []                       # e.g., ["2025-01-04:outage", "2025-01-06:ad_burst"]

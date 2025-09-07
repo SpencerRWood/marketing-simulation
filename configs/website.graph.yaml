@@ -1,0 +1,36 @@
+landing:
+  dropoff_prob: 0.15
+  clickable_elements: ["hero_cta", "learn_more"]
+  transitions:
+    - [product, 0.6]
+    - [content, 0.4]
+
+content:
+  dropoff_prob: 0.25
+  clickable_elements: ["related_post", "signup_banner"]
+  # no account creation/conversion here
+  transitions:
+    - [product, 0.5]
+    - [landing, 0.5]
+
+product:
+  dropoff_prob: 0.20
+  clickable_elements: ["add_to_cart", "specs_tab", "reviews_tab", "account_creation"]
+  account_creation_element: "account_creation"   # clicking this creates account
+  transitions:
+    - [cart, 0.6]
+    - [content, 0.4]
+
+cart:
+  dropoff_prob: 0.18
+  clickable_elements: ["checkout_btn", "remove_item"]
+  # no signup/conversion here
+  transitions:
+    - [checkout, 0.7]
+    - [product, 0.3]
+
+checkout:
+  dropoff_prob: 0.10
+  clickable_elements: ["submit_order"]
+  conversion_element: "submit_order"             # requires account first
+  transitions: []
