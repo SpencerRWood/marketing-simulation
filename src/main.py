@@ -3,7 +3,7 @@ import logging
 from pathlib import Path
 from datetime import datetime, timezone
 import simpy
-import pandas as pd
+import random
 
 from marketing_simulation.website import Page, WebsiteGraph
 from marketing_simulation.simulation import run_simulation
@@ -30,6 +30,10 @@ def main():
     seed  = int(sim_cfg["seed"])
     grace = int(sim_cfg["grace_period_s"])
 
+    # default NHPP config from simulation.default.yaml
+    default_nhpp_cfg = sim_cfg.get("nhpp_cfg")
+    log.info("params.arrival_profile", extra={"nhpp_default": default_nhpp_cfg})
+
     start_dt = _parse_utc(sim_cfg["start_dt_utc"])
     end_dt   = _parse_utc(sim_cfg["end_dt_utc"])
     if not (end_dt > start_dt):
@@ -46,20 +50,21 @@ def main():
     db_utils.ensure_schema_and_tables()
     if sim_cfg.get("reset_tables", True):
         db_utils.reset_tables(mode="truncate")
+    
+    seed = random.randint(1, 100)
 
-    date_range = pd.date_range(start_dt,end_dt)
-
-    for date in date_range:
-        summary = run_simulation(
-            site=site,
-            channel_plan=channel_plan,
-            seed=seed,
-            date=date,
-            grace_period_s=grace,
-        )
-        log.info("run_summary", extra=summary)
-        print(summary)
-        log.info("app_completed")
+    summary = run_simulation(
+        site=site,
+        channel_plan=channel_plan,
+        seed=seed,
+        start_dt=start_dt,
+        end_dt=end_dt,
+        grace_period_s=grace,
+        default_nhpp_cfg=default_nhpp_cfg,
+    )
+    log.info("run_summary", extra=summary)
+    print(summary)
+    log.info("app_completed")
 
 
 if __name__ == "__main__":

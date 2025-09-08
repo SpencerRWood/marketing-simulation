@@ -5,7 +5,7 @@ seed: 24
 
 # Simulation time controls
 start_dt_utc: "2025-01-01T00:00:00Z"   # optional, defaults to now if missing
-end_dt_utc:   "2025-01-02T00:00:00Z"
+end_dt_utc:   "2025-01-03T00:00:00Z"
 # days: 7                                # number of days to simulate
 grace_period_s: 600                    # seconds to let stragglers finish
 
@@ -25,3 +25,9 @@ log_params: true                       # log ground truth parameters at run star
 # Exogenous effects (optional extensions)
 # seasonality: true                      # enable/disable seasonality adjustment
 # shock_events: []                       # e.g., ["2025-01-04:outage", "2025-01-06:ad_burst"]
+
+nhpp_cfg:
+  base_rate_per_s: 0.00005   # off-peak baseline
+  peak_lift:       0.00030   # extra at peak (so max = base + lift)
+  peak_hour:       12        # local noon
+  sigma_hours:     3         # spread of the peak in hours

@@ -1,13 +1,29 @@
-# marketing_simulation/visitor.py
-import uuid, random
-from typing import Optional
-from datetime import datetime, timezone
-from mesa import Agent
-from faker import Faker
+
+from __future__ import annotations
+
+import uuid
+import random
 import logging
+from typing import Optional, Dict, Any
+from datetime import datetime, timezone
+from faker import Faker
+from mesa import Agent
+from marketing_simulation import db_utils
+try:
+    from marketing_simulation.logging_utils import get_logger  # type: ignore
+    log = get_logger("visitor")
+except Exception:
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s - %(message)s")
+    log = logging.getLogger("visitor")
+
+# DB helpers (new eager-write pattern)
 
 fake = Faker()
-log = logging.getLogger("visitor")
+
+def _utc_now() -> datetime:
+    """Return timezone-aware UTC now()"""
+    return datetime.now(timezone.utc)
+
 
 class VisitorAgent(Agent):
     def __init__(
@@ -31,10 +47,10 @@ class VisitorAgent(Agent):
         self.created_at = created_at or datetime.now(timezone.utc)
 
         # identity / profile
-        self.name: Optional[str] = None
-        self.gender: Optional[str] = None
-        self.age: Optional[int] = None
-        self.email: Optional[str] = None
+        self.name: Optional[str] = fake.name()
+        self.gender: Optional[str] = fake.random_element(["Male","Female","Other"])
+        self.age: Optional[int] = fake.random_int(18, 75)
+        self.email: Optional[str] = fake.unique.email()
 
         # funnel state
         self.is_identified = False
@@ -49,38 +65,24 @@ class VisitorAgent(Agent):
 
         # sim-only (use private backing fields to avoid property collisions)
         self.channel = channel
-        self.session_id = f"s_{self.visitor_id}"
+        self.session_id = str(uuid.uuid4())
         self._rng = rng or random.Random()
         self._faker = faker or Faker()
+        # Eager DB write of the skeleton visitor row
+        try:
+            db_utils.insert_visitor_created(
+                self.visitor_id,
+                created_at=self.created_at,
+                marketing_funnel_stage=self.marketing_funnel_stage,
+                is_identified=self.is_identified,
+            )
+        except Exception:
+            # Keep the simulation alive; record failure
+            log.exception("visitor_initial_write_failed", extra={"visitor_id": self.visitor_id})
 
-    # --- safe accessors (read-only) ---
-    @property
-    def rng(self) -> random.Random:
-        return self._rng
-
-    @property
-    def faker(self) -> Faker:
-        return self._faker
-
-    # --- state hooks ---
-    def identify_visitor(self, ts: datetime):
-        if ts.tzinfo is None:
-            ts = ts.replace(tzinfo=timezone.utc)
-
-        self.is_identified  = True
-        self.identified_at  = self.identified_at or ts
-        self.name   = getattr(self, "name", None)   or fake.name()
-        self.gender = getattr(self, "gender", None) or fake.random_element(["Male","Female","Other"])
-        self.age    = getattr(self, "age", None)    or fake.random_int(18, 75)
-        self.email  = getattr(self, "email", None)  or fake.unique.email()
-
-        # DO NOT write here; EOD batch will upsert
-        # mark dirty if you like, but not required since your EOD collects signed_up/converted
-        # self._enrichment_dirty = True
-
-        log.info("identify_visitor",
-                extra={"visitor_id": self.visitor_id, "email": self.email, "identified_at": ts.isoformat()})
-
+    # ---------------------------------------------------------------------
+    # Public actions
+    # ---------------------------------------------------------------------
     def complete_signup(self, ts: datetime):
         if ts.tzinfo is None:
             ts = ts.replace(tzinfo=timezone.utc)
@@ -90,35 +92,100 @@ class VisitorAgent(Agent):
         self.marketing_funnel_stage = "Consideration"
         self.stage_last_updated_date = ts
 
-        if not getattr(self, "is_identified", False):
-            self.identify_visitor(ts)  # sets name/gender/age/email in-memory only
+        # if not getattr(self, "is_identified", False):
+        #     self.identify_visitor(ts)  # sets name/gender/age/email in-memory only
 
         log.info("visitor_signup", extra={"visitor_id": self.visitor_id, "ts": ts.isoformat()})
 
-    def complete_conversion(self, ts: datetime):
-        self.converted = True
-        self.converted_timestamp = ts
-        self.marketing_funnel_stage = "Purchase"
-        self.stage_last_updated_date = ts
-        log.info("visitor_conversion", extra={"visitor_id": self.visitor_id, "ts": ts.isoformat()})
+    def identify(
+        self,
+        *,
+        name: Optional[str] = None,
+        email: Optional[str] = None,
+        gender: Optional[str] = None,
+        age: Optional[int] = None,
+        ts: Optional[datetime] = None,
+        marketing_funnel_stage: Optional[str] = "Identified",
+    ) -> None:
+        """Record that we captured identity (does NOT mark signup)."""
+        if name:   self.name = name
+        if email:  self.email = email
+        if gender: self.gender = gender
+        if age is not None: self.age = int(age)
 
-    def to_dict(self) -> dict:
-        return {
+        self.is_identified = True
+        if marketing_funnel_stage:
+            self.marketing_funnel_stage = marketing_funnel_stage
+        self.stage_last_updated_date = ts or _utc_now()
+
+        payload = {
             "visitor_id": self.visitor_id,
-            "channel": self.channel,
-            "return_visitor": self.return_visitor,
-            "is_identified": self.is_identified,
-            "identified_at": self.identified_at,
-            "name": getattr(self, "name", None),
-            "gender": getattr(self, "gender", None),
-            "age": getattr(self, "age", None),
-            "email": getattr(self, "email", None),
-            "signed_up": self.signed_up,
-            "sign_up_timestamp": self.sign_up_timestamp,
-            "converted": self.converted,
-            "converted_timestamp": self.converted_timestamp,
+            "created_at": self.created_at,
+            "name": self.name,
+            "gender": self.gender,
+            "age": self.age,
+            "email": self.email,
+            "is_identified": True,
+            # Explicitly keep signup FALSE so sticky-true logic won't flip it on
+            "signed_up": False,
             "marketing_funnel_stage": self.marketing_funnel_stage,
             "stage_last_updated_date": self.stage_last_updated_date,
-            "created_at": self.created_at,
         }
 
+        try:
+            # Use signup upsert with is_signed_up=False so it only enriches + sets identified
+            db_utils.upsert_visitor_on_signup(payload)
+        except Exception:
+            log.exception("visitor_identify_upsert_failed", extra={"visitor_id": self.visitor_id})
+
+    def complete_conversion(self, ts: Optional[datetime] = None) -> None:
+        """Mark this visitor as signed up (conversion)."""
+        ts = ts or _utc_now()
+        self.signed_up = True
+        self.is_identified = True  # signup implies we know who they are
+        self.sign_up_timestamp = ts
+        self.marketing_funnel_stage = "Signup"
+        self.stage_last_updated_date = ts
+
+        payload = {
+            "visitor_id": self.visitor_id,
+            "created_at": self.created_at,
+            "name": self.name,
+            "gender": self.gender,
+            "age": self.age,
+            "email": self.email,
+            "is_identified": True,
+            "signed_up": True,
+            "sign_up_timestamp": self.sign_up_timestamp,
+            "marketing_funnel_stage": self.marketing_funnel_stage,
+            "stage_last_updated_date": self.stage_last_updated_date,
+        }
+
+        try:
+            db_utils.upsert_visitor_on_signup(payload)
+        except Exception:
+            log.exception("visitor_signup_upsert_failed", extra={"visitor_id": self.visitor_id})
+
+    # ---------------------------------------------------------------------
+    # Utils
+    # ---------------------------------------------------------------------
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "visitor_id": self.visitor_id,
+            "created_at": self.created_at,
+            "name": self.name,
+            "gender": self.gender,
+            "age": self.age,
+            "email": self.email,
+            "is_identified": self.is_identified,
+            "signed_up": self.signed_up,
+            "sign_up_timestamp": self.sign_up_timestamp,
+            "marketing_funnel_stage": self.marketing_funnel_stage,
+            "stage_last_updated_date": self.stage_last_updated_date,
+        }
+
+    def __repr__(self) -> str:
+        return (
+            f"VisitorAgent(visitor_id={self.visitor_id}, identified={self.is_identified}, "
+            f"signed_up={self.signed_up}, marketing_funnel_stage={self.marketing_funnel_stage})"
+        )
